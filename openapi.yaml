@@ -1,0 +1,247 @@
+openapi: 3.0.3
+
+info:
+  title: CRUD Master Py API
+  version: 1.0.0
+  description: |
+    API Gateway for the CRUD Master Py movie streaming platform.
+
+    The gateway routes:
+      - HTTP requests under `/api/movies` to the Inventory API (`movies_db`).
+      - `POST /api/billing` requests asynchronously via RabbitMQ (`billing_queue`) to the Billing API (`billing_db`).
+
+servers:
+  - url: http://192.168.56.10:3000
+    description: API Gateway VM (gateway-vm)
+  - url: http://localhost:3000
+    description: Local API Gateway
+
+tags:
+  - name: Movies
+    description: Movie inventory CRUD operations forwarded to the Inventory API
+  - name: Billing
+    description: Asynchronous order billing queued via RabbitMQ
+
+paths:
+  /api/movies:
+    get:
+      tags:
+        - Movies
+      summary: Retrieve all movies or search by title
+      description: Returns all movies in the inventory, or only movies whose title contains the given `title` query parameter.
+      parameters:
+        - name: title
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Optional substring filter matched against movie titles.
+      responses:
+        "200":
+          description: List of matching movies
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Movie"
+        "502":
+          description: Inventory API unavailable
+
+    post:
+      tags:
+        - Movies
+      summary: Create a new movie
+      description: Creates a new movie entry in the Inventory API PostgreSQL database (`movies_db`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewMovie"
+      responses:
+        "201":
+          description: Movie created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Movie"
+        "400":
+          description: Invalid movie payload
+        "502":
+          description: Inventory API unavailable
+
+    delete:
+      tags:
+        - Movies
+      summary: Delete all movies
+      description: Deletes every movie record from the Inventory API database.
+      responses:
+        "200":
+          description: All movies deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "502":
+          description: Inventory API unavailable
+
+  /api/movies/{id}:
+    get:
+      tags:
+        - Movies
+      summary: Retrieve a single movie by ID
+      description: Fetches a single movie record by its unique identifier.
+      parameters:
+        - $ref: "#/components/parameters/MovieId"
+      responses:
+        "200":
+          description: Movie found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Movie"
+        "404":
+          description: Movie not found
+        "502":
+          description: Inventory API unavailable
+
+    put:
+      tags:
+        - Movies
+      summary: Update a movie by ID
+      description: Updates the title and/or description of an existing movie.
+      parameters:
+        - $ref: "#/components/parameters/MovieId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewMovie"
+      responses:
+        "200":
+          description: Movie updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Movie"
+        "400":
+          description: Invalid update payload
+        "404":
+          description: Movie not found
+        "502":
+          description: Inventory API unavailable
+
+    delete:
+      tags:
+        - Movies
+      summary: Delete a movie by ID
+      description: Deletes a single movie record identified by `id`.
+      parameters:
+        - $ref: "#/components/parameters/MovieId"
+      responses:
+        "200":
+          description: Movie deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "404":
+          description: Movie not found
+        "502":
+          description: Inventory API unavailable
+
+  /api/billing:
+    post:
+      tags:
+        - Billing
+      summary: Queue a billing order
+      description: |
+        Publishes the JSON billing payload to the RabbitMQ `billing_queue`.
+        Requests succeed even when the Billing API service is stopped; queued messages
+        are processed as soon as the Billing API starts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BillingRequest"
+      responses:
+        "200":
+          description: Billing message posted to RabbitMQ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Invalid JSON payload
+        "500":
+          description: Failed to publish message to RabbitMQ
+
+components:
+  parameters:
+    MovieId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+      description: Unique movie identifier
+
+  schemas:
+    Movie:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        title:
+          type: string
+          example: Interstellar
+        description:
+          type: string
+          example: Science fiction film about space exploration
+
+    NewMovie:
+      type: object
+      required:
+        - title
+        - description
+      properties:
+        title:
+          type: string
+          example: Inception
+        description:
+          type: string
+          example: A thief who steals corporate secrets through dream-sharing technology
+
+    BillingRequest:
+      type: object
+      required:
+        - user_id
+        - number_of_items
+        - total_amount
+      properties:
+        user_id:
+          oneOf:
+            - type: string
+            - type: integer
+          example: "3"
+        number_of_items:
+          oneOf:
+            - type: string
+            - type: integer
+          example: "5"
+        total_amount:
+          oneOf:
+            - type: string
+            - type: number
+          example: "180"
+
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Message posted
